@@ -6,8 +6,8 @@ import (
 
 	"github.com/vc2402/gomes/resolve"
 
-	"bellwood.com/server/core"
 	"github.com/kataras/iris"
+	"github.com/vc2402/utils"
 
 	log "github.com/cihub/seelog"
 	"github.com/spf13/pflag"
@@ -28,14 +28,14 @@ func main() {
 	if err != nil {
 		log.Warnf("readConfig: %v", err)
 	}
-	core.Init()
+	utils.Init()
 	resolve.Init()
 
 	ctx := context.Background()
 
 	app := iris.Default()
 	// app.Use(recover.New())
-	app.Logger().Install(core.ExternalLogger)
+	app.Logger().Install(utils.ExternalLogger)
 
 	app.Options("/api/*", CORS)
 	app.Use(CORS)
