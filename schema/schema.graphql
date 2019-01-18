@@ -1,0 +1,75 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+"The query type, represents all of the entry points into our object graph"
+type Query {
+  me(): Player
+  listRooms(): [Room!]!
+  getRoom(id: ID!): Room
+  listGames(): [Game!]!
+}
+
+"The mutation type, represents all updates we can make to our data"
+type Mutation {
+  createRoom(room: RoomInput!): Room
+  joinRoom(roomID: ID!, name: String!): Player!
+  play(roomID: ID!, playerID: ID!, action: Action!): ActionResult
+  deleteRoom(id: ID!): Room
+}
+
+"Interface for Game object"
+interface Game {
+  id: ID!
+  name: String!
+}
+
+enum GameState {
+  NEW,
+  READY,
+  ACTIVE,
+  FINISHED
+}
+
+"Game room"
+type Room {
+  id: ID!
+  game: Game!
+  name: String!
+  state: GameState!
+  #phase of current round
+  phase: String!
+  # available actions
+  actions: [String!]!
+  players: [RoomMember]!
+}
+
+"Player can play in a room"
+type Player {
+  id: ID!
+  name: String!
+}
+
+"RoomMember is playing in the Room"
+type RoomMember {
+  player: Player!
+  status: String!
+}
+
+type ActionResult {
+  status: String
+}
+input RoomInput {
+  name: String!
+  gameID: ID!
+}
+
+input ActionBit {
+  name: String!
+  value: String!
+}
+input Action {
+  name: String!
+  bits: [ActionBit!]!
+}
