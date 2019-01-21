@@ -37,16 +37,21 @@ type RoomInput struct {
 
 type Action struct {
 	Name string
-	Bits []ActionBit
+	Bits []KVPairInput
 }
 
-type ActionBit struct {
-	Name  *string
-	Value *string
+type KVPairInput struct {
+	Name  string
+	Value string
+}
+
+type KVPair struct {
+	Key string
+	Val string
 }
 
 type ActionResult struct {
-	status string
+	ActionStatus string
 }
 
 func (r *Resolver) ListGames(ctx context.Context) ([]*Game, error) {
@@ -79,7 +84,7 @@ func (r *Resolver) JoinRoom(ctx context.Context,
 	args *struct {
 		RoomID graphql.ID
 		Name   string
-	}) (*Player, error) {
+	}) (*RoomMember, error) {
 	id := ctx.Value(cSESSION_ID)
 	if id == "" {
 		return nil, errors.New("session is undefined")
@@ -89,27 +94,28 @@ func (r *Resolver) JoinRoom(ctx context.Context,
 
 func (r *Resolver) Play(ctx context.Context,
 	args *struct {
-		RoomID   graphql.ID
-		Action   Action
-		PlayerID graphql.ID
+		RoomID graphql.ID
+		Action Action
 	}) (*ActionResult, error) {
-	return &ActionResult{"ok"}, nil
+	return play(ctx, string(args.RoomID), &args.Action)
 }
 
-func (r *ActionResult) Status() *string { return &r.status }
+func (p *KVPair) Name() string          { return p.Key }
+func (p *KVPair) Value() string         { return p.Val }
+func (r *ActionResult) Status() *string { return &r.ActionStatus }
 
 func Handler(cont context.Context) iris.Handler {
 	return func(ctx iris.Context) {
 		log.Debugf("Handler: new request; %v", ctx.RemoteAddr)
 		id := ctx.GetCookie(cSESSION_ID)
 		if id != "" {
-			cont = context.WithValue(cont, cSESSION_ID, id)
 			log.Debugf("Handler: new request; session-id: %s", id)
 		} else {
-			cook := utils.RandString(32)
-			ctx.SetCookieKV(cSESSION_ID, cook)
-			log.Infof("Handler: generating new session-id: %s", cook)
+			id = utils.RandString(32)
+			ctx.SetCookieKV(cSESSION_ID, id)
+			log.Infof("Handler: generating new session-id: %s", id)
 		}
+		cont = context.WithValue(cont, cSESSION_ID, id)
 		req := ctx.Request().WithContext(cont)
 		handler.ServeHTTP(ctx.ResponseWriter(), req)
 	}

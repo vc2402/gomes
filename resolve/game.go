@@ -1,20 +1,42 @@
 package resolve
 
-import graphql "github.com/graph-gophers/graphql-go"
+import (
+	"context"
+
+	graphql "github.com/graph-gophers/graphql-go"
+)
+
+type GameImpl interface {
+	Game() *Game
+	Play(context.Context, *Action) *ActionResult
+	Params(context.Context) []*KVPair
+	Phase(context.Context) string
+	Actions(context.Context) []string
+	NewMember(*RoomMember)
+}
+
+type ImplGenerator func(*Room) GameImpl
 
 type Game struct {
-	id   graphql.ID
-	name string
+	id            graphql.ID
+	name          string
+	implGenerator ImplGenerator
 }
 
 func (r *Game) ID() graphql.ID { return r.id }
 func (r *Game) Name() string   { return r.name }
 
-var games []*Game
+var games []*Game = make([]*Game, 0)
 
 func initGame() {
-	games = make([]*Game, 1)
-	games[0] = &Game{id: "profs", name: "Professions"}
+	// games = make([]*Game, 1)
+	// games[0] = &Game{id: "profs", name: "Professions", implGenerator: g.NewProfessionsGame}
+}
+
+func AddGame(id string, name string, gen ImplGenerator) *Game {
+	g := &Game{id: graphql.ID(id), name: name, implGenerator: gen}
+	games = append(games, g)
+	return g
 }
 
 func listGames() []*Game {

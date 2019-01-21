@@ -3,19 +3,27 @@ schema {
   mutation: Mutation
 }
 
-"The query type, represents all of the entry points into our object graph"
+"Query"
 type Query {
-  me(): Player
-  listRooms(): [Room!]!
+  "me"
+  me: Player
+  "listRooms"
+  listRooms: [Room!]!
+  "getRoom"
   getRoom(id: ID!): Room
-  listGames(): [Game!]!
+  "listGames"
+  listGames: [Game!]!
 }
 
-"The mutation type, represents all updates we can make to our data"
+"Mutation"
 type Mutation {
+  "createRoom"
   createRoom(room: RoomInput!): Room
-  joinRoom(roomID: ID!, name: String!): Player!
-  play(roomID: ID!, playerID: ID!, action: Action!): ActionResult
+  "joinRoom"
+  joinRoom(roomID: ID!, name: String!): RoomMember!
+  "play"
+  play(roomID: ID!, action: Action!): ActionResult
+  "deleteRoom"
   deleteRoom(id: ID!): Room
 }
 
@@ -25,11 +33,26 @@ interface Game {
   name: String!
 }
 
+"State of the Game"
 enum GameState {
-  NEW,
-  READY,
+  # waiting for all the players join the room
+  COLLECTING,
+  # waiting for actions of members (eg while all the members report theire professions)
+  PREPARING,
+  # the game itself
   ACTIVE,
   FINISHED
+}
+
+"Phases"
+enum ProfessionsGamePhases {
+  #for ACTIVE state
+  #asking questions to the next player
+  ASKING
+  #waiting for other players ask
+  WAITING
+  #vote for spy
+  VOTING
 }
 
 "Game room"
@@ -37,12 +60,15 @@ type Room {
   id: ID!
   game: Game!
   name: String!
+  # player ID of asking if he is already a member of room
+  you: ID
   state: GameState!
   #phase of current round
   phase: String!
   # available actions
   actions: [String!]!
   players: [RoomMember]!
+  params: [KVPair]!
 }
 
 "Player can play in a room"
@@ -54,22 +80,31 @@ type Player {
 "RoomMember is playing in the Room"
 type RoomMember {
   player: Player!
+  # contains one of possible phases or states of the room or COMPLETE if user ready for next turn
   status: String!
 }
 
+"Result of a action"
 type ActionResult {
   status: String
 }
+"Input for Room"
 input RoomInput {
   name: String!
   gameID: ID!
 }
-
-input ActionBit {
+"KV Pair for types"
+type KVPair {
   name: String!
   value: String!
 }
+"KV Pair for input"
+input KVPairInput {
+  name: String!
+  value: String!
+}
+"Action"
 input Action {
   name: String!
-  bits: [ActionBit!]!
+  bits: [KVPairInput!]!
 }

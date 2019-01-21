@@ -4,6 +4,8 @@ import (
 	"context"
 	"flag"
 
+	"github.com/vc2402/gomes/games"
+
 	"github.com/vc2402/gomes/resolve"
 
 	"github.com/kataras/iris"
@@ -30,6 +32,7 @@ func main() {
 	}
 	utils.Init()
 	resolve.Init()
+	initGames()
 
 	ctx := context.Background()
 
@@ -67,4 +70,8 @@ func CORS(ctx iris.Context) {
 	} else {
 		ctx.Next()
 	}
+}
+
+func initGames() {
+	games.InitProfessions()
 }
