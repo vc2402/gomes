@@ -5,22 +5,39 @@ import (
 	"time"
 
 	log "github.com/cihub/seelog"
-	graphql "github.com/graph-gophers/graphql-go"
 	"github.com/vc2402/utils"
 )
 
 type Player struct {
-	id       graphql.ID
-	name     string
-	created  int64
-	activity int64
+	ID       string
+	Name     string
+	Created  int64
+	Activity int64
 }
 
 var players = make(map[string]*Player)
 var playersMux sync.RWMutex
 
-func (r *Player) ID() graphql.ID { return r.id }
-func (r *Player) Name() string   { return r.name }
+// func (r *Player) ID() graphql.ID { return r.ID }
+// func (r *Player) Name() string   { return r.name }
+
+func (p *Player) save() {
+	store := getStorage()
+	if store != nil {
+		create := p.Activity == 0
+		p.Activity = time.Now().Unix()
+		if create {
+			log.Tracef("player: going to create new record in db %s", p.ID)
+			store.CreateRecord(p.ID, p)
+		} else {
+			log.Tracef("player: going to update record in db %s", p.ID)
+			store.UpdateRecord(p.ID, p)
+		}
+
+	} else {
+		log.Tracef("store not found. skipping saving player")
+	}
+}
 
 func newPlayer(name string, id string) (*Player, error) {
 	if id == "" {
@@ -31,19 +48,33 @@ func newPlayer(name string, id string) (*Player, error) {
 	if p == nil {
 		playersMux.Lock()
 		defer playersMux.Unlock()
-		p = &Player{id: graphql.ID(id), name: name, created: time.Now().Unix()}
+		p = &Player{ID: id, Name: name, Created: time.Now().Unix()}
 		players[id] = p
 	}
-
+	p.save()
 	return p, nil
 }
 
 func getPlayer(id string) *Player {
+	log.Tracef("getPlayer: %s", id)
 	playersMux.RLock()
 	defer playersMux.RUnlock()
 	p, ok := players[id]
 	if ok {
-		p.activity = time.Now().Unix()
+		p.Activity = time.Now().Unix()
+	} else {
+		log.Tracef("getPlayer: %s; looking in store", id)
+		store := getStorage()
+		if store != nil {
+			p = &Player{}
+			store.GetRecord(id, p)
+			if p.ID == id {
+				players[id] = p
+				ok = true
+			} else {
+				p = nil
+			}
+		}
 	}
 	return p
 }

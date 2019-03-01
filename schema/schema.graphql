@@ -1,6 +1,7 @@
 schema {
   query: Query
   mutation: Mutation
+  subscription: Subscription
 }
 
 "Query"
@@ -13,6 +14,8 @@ type Query {
   getRoom(id: ID!): Room
   "listGames"
   listGames: [Game!]!
+  "get history of the game; current round by default"
+  history(roomID: ID!, round: Int): [KVPair!]!
 }
 
 "Mutation"
@@ -25,6 +28,12 @@ type Mutation {
   play(roomID: ID!, action: Action!): ActionResult
   "deleteRoom"
   deleteRoom(id: ID!): Room
+}
+
+"Subscription"
+type Subscription {
+  "roomUpdates"
+  roomUpdates(roomID: ID!): RoomUpdate!
 }
 
 "Interface for Game object"
@@ -49,10 +58,24 @@ enum ProfessionsGamePhases {
   #for ACTIVE state
   #asking questions to the next player
   ASKING
+  #replying 
+  REPLYING
   #waiting for other players ask
   WAITING
   #vote for spy
   VOTING
+}
+
+"update on room"
+type RoomUpdate {
+  event: RoomEvent!
+}
+
+"Events by room"
+type RoomEvent {
+  id: ID
+  name: String!
+  value: String!
 }
 
 "Game room"
@@ -61,7 +84,8 @@ type Room {
   game: Game!
   name: String!
   # player ID of asking if he is already a member of room
-  you: ID
+  you: Int
+  round: Int!
   state: GameState!
   #phase of current round
   phase: String!
@@ -82,6 +106,7 @@ type RoomMember {
   player: Player!
   # contains one of possible phases or states of the room or COMPLETE if user ready for next turn
   status: String!
+  index: Int!
 }
 
 "Result of a action"

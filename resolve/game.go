@@ -12,7 +12,10 @@ type GameImpl interface {
 	Params(context.Context) []*KVPair
 	Phase(context.Context) string
 	Actions(context.Context) []string
-	NewMember(*RoomMember)
+	NewMember(context.Context, *RoomMember)
+
+	SaveState() interface{}
+	LoadState(interface{}) error
 }
 
 type ImplGenerator func(*Room) GameImpl
