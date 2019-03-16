@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -45,6 +46,12 @@ type RoomUpdate struct {
 type RoomEvent struct {
 	name  string
 	value string
+}
+
+type RoomsSorter struct {
+	rooms  []*Room
+	sortBy string
+	desc   bool
 }
 
 var rooms map[string]*Room = make(map[string]*Room)
@@ -174,7 +181,7 @@ func (r *RoomMember) GetValue(attr string) (interface{}, error) {
 func (r *RoomMember) SetValue(attr string, from interface{}) error {
 	m, ok := from.(string)
 	if ok {
-		player := getPlayer(m)
+		player := GetPlayer(m)
 		if player != nil {
 			r.Player = player
 			return nil
@@ -190,6 +197,21 @@ func (ru *RoomUpdate) Event() *RoomEvent { return ru.event }
 func (re *RoomEvent) Name() string    { return re.name }
 func (re *RoomEvent) Value() string   { return re.value }
 func (re *RoomEvent) ID() *graphql.ID { return (*graphql.ID)(&re.value) }
+
+// RoomsSorter
+func (rs RoomsSorter) Len() int      { return len(rs.rooms) }
+func (rs RoomsSorter) Swap(i, j int) { rs.rooms[i], rs.rooms[j] = rs.rooms[j], rs.rooms[i] }
+func (rs RoomsSorter) Less(i, j int) bool {
+	var ret bool = false
+	switch rs.sortBy {
+	default:
+		ret = (rs.rooms[i].Created < rs.rooms[j].Created)
+	}
+	if rs.desc {
+		ret = !ret
+	}
+	return ret
+}
 
 func newRoom(ctx context.Context, gameID string, name string) (*Room, error) {
 	var id string
@@ -286,14 +308,15 @@ func joinRoom(ctx context.Context, roomID string, playerName string) (*RoomMembe
 	}
 	var pl *Player
 	if rm == nil {
-		pl = getPlayer(playerID)
+		pl = GetPlayer(playerID)
 		if pl == nil {
-			pl, err = newPlayer(playerName, playerID)
-			if err != nil {
-				log.Warnf("joinRoom: %s problem creat the player: %v", roomID, err)
-				return nil, err
-			}
-			log.Tracef("joinRoom: %s: new player was created", roomID)
+			// pl, err = newPlayer(playerName, playerID)
+			// if err != nil {
+			// 	log.Warnf("joinRoom: %s problem create the player: %v", roomID, err)
+			// 	return nil, err
+			// }
+			// log.Tracef("joinRoom: %s: new player was created", roomID)
+			return nil, errors.New("not logged in")
 		}
 		rm = &RoomMember{Player: pl, Index: int32(len(room.Players))}
 		room.impl.NewMember(ctx, rm)
@@ -320,6 +343,8 @@ func listRooms() ([]*Room, error) {
 		if !ok {
 			log.Warnf("listRooms: invalid return type: %+v", arr)
 		}
+		sorter := RoomsSorter{ret, "Created", true}
+		sort.Sort(sorter)
 	}
 	return ret, err
 }
@@ -333,7 +358,8 @@ func deleteRoom(ctx context.Context, id string) (*Room, error) {
 	roomsLock.Lock()
 	defer roomsLock.Unlock()
 	delete(rooms, id)
-	return room, nil
+	store := getStorage()
+	return room, store.DeleteRecord("Room", id)
 }
 
 func play(ctx context.Context, id string, act *Action) (*ActionResult, error) {
@@ -414,7 +440,7 @@ func (r *Room) fillMember(ctx context.Context) context.Context {
 	log.Tracef("fillMemeber: looking for member")
 	if s := ctx.Value(cSESSION_ID); s != nil {
 		log.Tracef("fillMemeber: looking for member; session id: %+v", s)
-		if p := getPlayer(s.(string)); p != nil {
+		if p := GetPlayer(s.(string)); p != nil {
 			log.Tracef("fillMemeber: looking for member; player: %+v", p)
 			for _, m := range r.Players {
 				log.Tracef("fillMemeber: looking for member; comparing with member: %+v", m)

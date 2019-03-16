@@ -122,3 +122,13 @@ func (s *Store) UpdateRecord(key string, buf interface{}) error {
 		return errors.New("not iplemented")
 	}
 }
+
+func (s *Store) DeleteRecord(object string, key string) error {
+	switch s.kind {
+	case SKBolt:
+		log.Tracef("DeleteRecord: going to call bolt.DeleteRecord fro object kind %s", object)
+		return s.bolt.DeleteRecord(object, key)
+	default:
+		return errors.New("not iplemented")
+	}
+}

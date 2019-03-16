@@ -132,6 +132,17 @@ func (db *boltDB) PutRecord(key string, desc *storable, rec interface{}) error {
 	})
 }
 
+func (db *boltDB) DeleteRecord(object string, key string) error {
+	return db.bolt.Update(func(tx *bolt.Tx) error {
+		log.Tracef("DeleteRecord: for key %s and object type %s", key, object)
+		buck := tx.Bucket([]byte(object))
+		if buck != nil {
+			return buck.Delete([]byte(key))
+		}
+		return errors.New("invalif object kind: " + object)
+	})
+}
+
 func (db *boltDB) toObject(desc *storable, rec *reflect.Value) (interface{}, error) {
 	var fields interface{}
 	var err error
@@ -157,11 +168,12 @@ func (db *boltDB) fromObject(desc *storable, rec *reflect.Value, buf interface{}
 		err = db.fromMap(desc, rec, buf.(map[string]interface{}))
 
 	case reflect.String:
-		str, ok := buf.(*string)
+		str, ok := buf.(string)
 		if ok {
-			*str = rec.String()
+			log.Tracef("going to set value of %+v to %+v", rec, buf)
+			reflect.Indirect(*rec).SetString(str)
 		} else {
-			log.Warnf("fromObject: can't put string to %+v", buf)
+			log.Warnf("fromObject: can't get string from %+v", buf)
 		}
 	}
 	return err
@@ -323,6 +335,10 @@ func (db *boltDB) prepareField(f *field, v *reflect.Value, parent *reflect.Value
 
 func (db *boltDB) putField(f *field, v *reflect.Value, fldVal interface{}, parent *reflect.Value) (err error) {
 	log.Tracef("putField: for %s", f.name)
+	if fldVal == nil {
+		log.Tracef("putField: for %s: value is nil, skipping", f.name)
+		return
+	}
 	switch f.tip {
 	case FTArray:
 		err = db.fromArray(f.elem, v, fldVal.([]interface{}))
@@ -372,6 +388,7 @@ func (db *boltDB) putField(f *field, v *reflect.Value, fldVal interface{}, paren
 			}
 		}
 		if meth.IsValid() && getMeth.IsValid() {
+			log.Tracef("putField: calling GetValue for %s", f.name)
 			buff := getMeth.Call([]reflect.Value{reflect.ValueOf(f.name)})
 			if len(buff) > 1 && !buff[1].IsNil() {
 				err = buff[1].Interface().(error)
@@ -403,7 +420,9 @@ func (db *boltDB) putField(f *field, v *reflect.Value, fldVal interface{}, paren
 	default:
 		err = nil
 		log.Tracef("putField: setting value from interface %v for %s", fldVal, f.name)
+		// if fldVal != nil {
 		v.Set(reflect.ValueOf(fldVal))
+		// }
 	}
 	log.Tracef("putField: for %s: exiting; error: %+v", f.name, err)
 	return

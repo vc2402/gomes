@@ -47,14 +47,20 @@ func main() {
 
 	gql := resolve.InitGraphQL(stor)
 
-	app.Options("/api/query", CORS)
+	// app.Options("/api/query", CORS)
+	app.Options("/api/*", CORS)
 	// app.Options("/api2/query", CORS)
-	app.Options("/api/query/ws", CORS)
+	// app.Options("/api/query/ws", CORS)
 	app.Use(CORS)
 	// app.Any("/api/query", resolve.Handler(ctx))
 	app.Any("/api/query", gql.GQLHandler(ctx))
 	app.Any("/api/query/ws", iris.FromStd(gql.WSHandler))
 
+	user := app.Party("/api/user")
+	user.Post("/login", resolve.LoginHandler(ctx))
+	user.Get("/me", resolve.MeHandler(ctx))
+
+	app.Any("/api/admin", resolve.AdminHandler(ctx))
 	err = app.Run(iris.Addr(viper.GetString("port"), configureHost), iris.WithoutServerError(iris.ErrServerClosed))
 	if err != nil {
 		log.Critical("server.Run: ", err)
@@ -67,7 +73,7 @@ func configureHost(su *host.Supervisor) {
 	//
 	// we register a shutdown "event" callback
 	su.RegisterOnShutdown(func() {
-		log.Tracef("Server shus down")
+		log.Tracef("Server shuts down")
 
 	})
 	// su.RegisterOnError

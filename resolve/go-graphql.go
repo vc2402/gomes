@@ -3,14 +3,12 @@ package resolve
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/vc2402/gomes/store"
 
 	log "github.com/cihub/seelog"
 	"github.com/functionalfoundry/graphqlws"
 	"github.com/kataras/iris"
-	"github.com/vc2402/utils"
 
 	"github.com/graphql-go/graphql"
 )
@@ -29,6 +27,8 @@ type Client struct {
 }
 
 var Schema *GomesScheme
+
+var TokenHMACSecret = []byte("hJlasdf;jk60sadf96GgasfghfgHGfyfgOoSDflkjh^asdf87Gkhgasdfl")
 
 func getStorage() *store.Store {
 	return Schema.storage
@@ -164,6 +164,21 @@ func InitGraphQL(stor *store.Store) *GomesScheme {
 		},
 	)
 
+	var loginResultType = graphql.NewObject(
+		graphql.ObjectConfig{
+			Name: "LoginResult",
+			Fields: graphql.Fields{
+				"token": &graphql.Field{
+					Type: graphql.String,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						ar := p.Source.(string)
+						return ar, nil
+					},
+				},
+			},
+		},
+	)
+
 	var roomInputType = graphql.NewInputObject(
 		graphql.InputObjectConfig{
 			Name: "RoomInput",
@@ -173,6 +188,20 @@ func InitGraphQL(stor *store.Store) *GomesScheme {
 				},
 				"gameID": &graphql.InputObjectFieldConfig{
 					Type: graphql.ID,
+				},
+			},
+		},
+	)
+
+	var loginInputType = graphql.NewInputObject(
+		graphql.InputObjectConfig{
+			Name: "LoginInput",
+			Fields: graphql.InputObjectConfigFieldMap{
+				"name": &graphql.InputObjectFieldConfig{
+					Type: graphql.String,
+				},
+				"password": &graphql.InputObjectFieldConfig{
+					Type: graphql.String,
 				},
 			},
 		},
@@ -360,6 +389,22 @@ func InitGraphQL(stor *store.Store) *GomesScheme {
 
 	mutation := graphql.ObjectConfig{Name: "Mutation",
 		Fields: graphql.Fields{
+			"login": &graphql.Field{
+				Type:        loginResultType,
+				Description: "login ",
+				Args: graphql.FieldConfigArgument{
+					"credentials": &graphql.ArgumentConfig{
+						Type: loginInputType,
+					},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					credentials := p.Args["credentials"].(map[string]interface{})
+					name := credentials["name"].(string)
+					pswd := credentials["password"].(string)
+					log.Tracef("login: got: %s: %s", name, pswd)
+					return Login(name, pswd)
+				},
+			},
 			"createRoom": &graphql.Field{
 				Type:        roomType,
 				Description: "create room ",
@@ -483,15 +528,15 @@ type request struct {
 
 func (gs *GomesScheme) Process(ctx iris.Context, cont context.Context) {
 	log.Debugf("Handler: new request; %v", ctx.RemoteAddr)
-	id := ctx.GetCookie(cSESSION_ID)
-	if id != "" {
-		log.Debugf("Handler: new request; session-id: %s", id)
-	} else {
-		id = utils.RandString(32)
-		ctx.SetCookieKV(cSESSION_ID, id, iris.CookieExpires(5*24*time.Hour))
-		log.Infof("Handler: generating new session-id: %s", id)
-	}
-	cont = context.WithValue(cont, cSESSION_ID, id)
+	// id := ctx.GetCookie(cSESSION_ID)
+	// if id != "" {
+	// 	log.Debugf("Handler: new request; session-id: %s", id)
+	// } else {
+	// 	id = utils.RandString(32)
+	// 	ctx.SetCookieKV(cSESSION_ID, id, iris.CookieExpires(5*24*time.Hour))
+	// 	log.Infof("Handler: generating new session-id: %s", id)
+	// }
+	// cont = context.WithValue(cont, cSESSION_ID, id)
 
 	request := request{}
 	err := ctx.ReadJSON(&request)
@@ -500,6 +545,16 @@ func (gs *GomesScheme) Process(ctx iris.Context, cont context.Context) {
 		return
 	}
 	log.Tracef("  got new query: %v", request)
+	if request.OperationName != "Login" {
+		id, _ := Authenticate(ctx, true)
+		if id == "" {
+			// ctx.JSON(map[string]interface{}{"error": err.Error()})
+			log.Tracef("not authenticated. Returning: %d", ctx.GetStatusCode())
+			return
+		}
+		cont = context.WithValue(cont, cSESSION_ID, id)
+	}
+
 	// cont = context.WithValue(cont, "Schema", gs)
 	cont = context.WithValue(cont, "UpdateChannel", gs.updateChannel)
 	result := graphql.Do(graphql.Params{
