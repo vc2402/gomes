@@ -25,6 +25,11 @@ func MeHandler(cont context.Context) iris.Handler {
 	}
 }
 
+func SetHandler(cont context.Context) iris.Handler {
+	return func(ctx iris.Context) {
+		ProcessSet(ctx, cont)
+	}
+}
 func ProcessLogin(ctx iris.Context, cont context.Context) {
 	body := map[string]string{}
 	err := ctx.ReadJSON(&body)
@@ -72,7 +77,41 @@ func ProcessMe(ctx iris.Context, cont context.Context) {
 	ctx.JSON(map[string]interface{}{"status": "ok", "code": 0, "description": "success", "player": *p})
 	// ctx.StatusCode(400)
 }
+func ProcessSet(ctx iris.Context, cont context.Context) {
+	id, err := Authenticate(ctx, true)
+	if err != nil {
+		return
+	}
+	p := GetPlayer(id)
+	body := map[string]string{}
+	err = ctx.ReadJSON(&body)
+	if err != nil {
+		createErrorResponse(ctx, -101, "can't unmarshal request", 400)
+		return
+	}
+	username := body["name"]
+	login := body["login"]
+	pswd := body["password"]
+	if pswd != "" {
+		p.Password = pswd
+	}
+	if login != "" {
+		pp := FindPlayer(login)
+		if pp != nil {
+			createErrorResponse(ctx, -201, "login is not unique", 409)
+			return
+		}
+		p.Login = login
 
+	}
+	if username != "" {
+		p.Name = username
+	}
+
+	p.save()
+	ctx.JSON(map[string]interface{}{"status": "ok", "code": 0, "description": "success", "player": *p})
+	// ctx.StatusCode(400)
+}
 func Authenticate(ctx iris.Context, createResponse bool) (string, error) {
 	authHeader := ctx.GetHeader("authorization")
 	log.Tracef("Authenticate: %s", authHeader)

@@ -59,6 +59,7 @@ func main() {
 	user := app.Party("/api/user")
 	user.Post("/login", resolve.LoginHandler(ctx))
 	user.Get("/me", resolve.MeHandler(ctx))
+	user.Post("/me", resolve.SetHandler(ctx))
 
 	app.Any("/api/admin", resolve.AdminHandler(ctx))
 	err = app.Run(iris.Addr(viper.GetString("port"), configureHost), iris.WithoutServerError(iris.ErrServerClosed))

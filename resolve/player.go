@@ -17,7 +17,7 @@ type Player struct {
 	Login    string   `json:"login,omitempty"`
 	Password string   `json:"-"`
 	Created  int64    `json:"created,omitempty"`
-	Activity int64    `json:"activity,omitempty"`
+	Activity int64    `json:"modified,omitempty"`
 	Roles    []string `json:"roles,omitempty"`
 }
 
