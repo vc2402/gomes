@@ -5,6 +5,7 @@ import (
 
 	log "github.com/cihub/seelog"
 	"github.com/kataras/iris"
+	"github.com/vc2402/gomes/store"
 	"github.com/vc2402/utils"
 )
 
@@ -35,7 +36,13 @@ func ProcessAdmin(ctx iris.Context, cont context.Context) {
 	log.Tracef("admin request: %+v", body)
 	switch body.Method {
 	case "listUsers":
-		players, err := listPlayers()
+		filter := store.Filter{Limit: 100}
+		if params["startsWith"] != nil {
+			filter.Field = "Login"
+			filter.Mask = params["startsWith"].(string)
+			filter.Flags = store.FFSeek
+		}
+		players, err := listPlayers(filter)
 		if err != nil {
 			createErrorResponse(ctx, -201, "problem while listing users", 500)
 			return

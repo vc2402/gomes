@@ -75,6 +75,27 @@ func InitGraphQL(stor *store.Store) *GomesScheme {
 						return pl.Name, nil
 					},
 				},
+				"login": &graphql.Field{
+					Type: graphql.String,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						pl := p.Source.(*Player)
+						return pl.Login, nil
+					},
+				},
+				"email": &graphql.Field{
+					Type: graphql.String,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						pl := p.Source.(*Player)
+						return pl.Email, nil
+					},
+				},
+				"avatar": &graphql.Field{
+					Type: graphql.String,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						pl := p.Source.(*Player)
+						return pl.Avatar, nil
+					},
+				},
 			},
 		},
 	)
@@ -260,6 +281,13 @@ func InitGraphQL(stor *store.Store) *GomesScheme {
 						return room.Game, nil
 					},
 				},
+				"owner": &graphql.Field{
+					Type: playerType,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						room := p.Source.(*Room)
+						return room.Owner, nil
+					},
+				},
 				"you": &graphql.Field{
 					Type: graphql.Int,
 					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -336,10 +364,17 @@ func InitGraphQL(stor *store.Store) *GomesScheme {
 			},
 			"listRooms": &graphql.Field{
 				Type:        graphql.NewList(roomType),
-				Description: "List all the rooms",
+				Description: "List all the rooms you have access",
+				Args: graphql.FieldConfigArgument{
+					"all": &graphql.ArgumentConfig{
+						Type:         graphql.Boolean,
+						DefaultValue: false,
+					},
+				},
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					// log.Tracef("resolve: %+v", p)
-					return listRooms()
+					all := p.Args["all"].(bool)
+					return listRooms(p.Context, all)
 				},
 			},
 			"getRoom": &graphql.Field{
@@ -354,6 +389,29 @@ func InitGraphQL(stor *store.Store) *GomesScheme {
 					log.Tracef("resolve: %+v", p)
 					id := p.Args["id"].(string)
 					return getRoom(p.Context, id)
+				},
+			},
+			"listPlayers": &graphql.Field{
+				Type:        graphql.NewList(playerType),
+				Description: "List all the players by login prefix (or all if you are admin)",
+				Args: graphql.FieldConfigArgument{
+					"startsWith": &graphql.ArgumentConfig{
+						Type:         graphql.String,
+						DefaultValue: "",
+					},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					// log.Tracef("resolve: %+v", p)
+					prefix := p.Args["startsWith"].(string)
+					var filter store.Filter
+					if prefix != "" {
+						filter.Field = "Login"
+						filter.Mask = prefix
+						filter.Flags = store.FFSeek
+					} else if !isAdmin(p.Context) {
+						return make([]*Player, 0), nil
+					}
+					return listPlayers(filter)
 				},
 			},
 			"listGames": &graphql.Field{

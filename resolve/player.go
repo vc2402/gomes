@@ -7,6 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/context"
+
+	"github.com/vc2402/gomes/store"
+
 	log "github.com/cihub/seelog"
 	"github.com/vc2402/utils"
 )
@@ -14,7 +18,9 @@ import (
 type Player struct {
 	ID       string   `json:"id,omitempty"`
 	Name     string   `json:"name,omitempty"`
-	Login    string   `json:"login,omitempty"`
+	Login    string   `json:"login,omitempty" store:"index,unique,ci"`
+	Email    string `json:"email,omitempty"`
+	Avatar   string `json:"avatar,omitempty"`
 	Password string   `json:"-"`
 	Created  int64    `json:"created,omitempty"`
 	Activity int64    `json:"modified,omitempty"`
@@ -29,8 +35,8 @@ var playersMux sync.RWMutex
 
 func FindPlayer(login string) *Player {
 	users := make([]*Player, 0)
-	store := getStorage()
-	arr, err := store.ListRecords(users)
+	storage := getStorage()
+	arr, err := storage.ListRecords(store.Filter{Field: "Login", Mask: login}, users)
 	var ok bool
 	if err == nil {
 		users, ok = arr.([]*Player)
@@ -45,21 +51,22 @@ func FindPlayer(login string) *Player {
 	return nil
 }
 
-func (p *Player) save() {
+func (p *Player) save() error {
 	store := getStorage()
 	if store != nil {
 		create := p.Activity == 0
 		p.Activity = time.Now().Unix()
 		if create {
 			log.Tracef("player: going to create new record in db %s", p.ID)
-			store.CreateRecord(p.ID, p)
+			return store.CreateRecord(p.ID, p)
 		} else {
 			log.Tracef("player: going to update record in db %s", p.ID)
-			store.UpdateRecord(p.ID, p)
+			return store.UpdateRecord(p.ID, p)
 		}
 
 	} else {
 		log.Tracef("store not found. skipping saving player")
+		return nil
 	}
 }
 
@@ -68,15 +75,18 @@ func newPlayer(name string, id string, login string) (*Player, error) {
 		id = utils.RandString(32)
 	}
 	log.Debugf("newPlayer: %s with id %s", name, id)
+	var err error
 	p := GetPlayer(id)
 	if p == nil {
 		playersMux.Lock()
 		defer playersMux.Unlock()
 		p = &Player{ID: id, Name: name, Created: time.Now().Unix(), Login: login, Password: "qq38ww12", Roles: []string{}}
-		players[id] = p
+		err = p.save()
+		if err == nil {
+			players[id] = p
+		}
 	}
-	p.save()
-	return p, nil
+	return p, err
 }
 
 func GetPlayer(id string) *Player {
@@ -101,6 +111,23 @@ func GetPlayer(id string) *Player {
 		}
 	}
 	return p
+}
+
+func resolvePlayer(ctx context.Context) *Player {
+	playerID := ctx.Value(cSESSION_ID).(string)
+	return GetPlayer(playerID)
+}
+
+func isAdmin(ctx context.Context) bool {
+	pl := resolvePlayer(ctx)
+	if pl != nil {
+		for _, r := range pl.Roles {
+			if r == "admin" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func deletePlayer(id string) (*Player, error) {
@@ -141,10 +168,10 @@ func (rs PlayersSorter) Less(i, j int) bool {
 	return ret
 }
 
-func listPlayers() ([]*Player, error) {
+func listPlayers(filter store.Filter) ([]*Player, error) {
 	ret := make([]*Player, 0)
-	store := getStorage()
-	arr, err := store.ListRecords(ret)
+	storage := getStorage()
+	arr, err := storage.ListRecords(filter, ret)
 	var ok bool
 	if err == nil {
 		ret, ok = arr.([]*Player)

@@ -106,6 +106,8 @@ func initStore() *store.Store {
 	// db, err := store.InitBolt("gomes.bolt")
 	db, err := store.Init()
 	if err == nil {
+		db.RebuildIndexes(resolve.Player{})
+		db.RebuildIndexes(resolve.Room{})
 		return db
 	}
 	return nil

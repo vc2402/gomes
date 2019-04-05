@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vc2402/gomes/store"
+
 	"github.com/vc2402/utils"
 
 	log "github.com/cihub/seelog"
@@ -21,12 +23,13 @@ type Room struct {
 	ID       string           `json:"id,omitempty" store:"id"`
 	Game     *Game            `json:"game,omitempty" store:"helper"`
 	impl     GameImpl         `store:"ignore"`
-	Name     string           `json:"name,omitempty" bson:"name"`
-	State    string           `json:"state,omitempty" bson:"state"`
-	Players  []*RoomMember    `json:"players,omitempty" bson:"players"`
-	Created  int64            `json:"created,omitempty" bson:"created"`
-	Activity int64            `json:"activity,omitempty" bson:"activity"`
-	Round    int32            `json:"round,omitempty" bson:"round"`
+	Name     string           `json:"name,omitempty"`
+	State    string           `json:"state,omitempty"`
+	Players  []*RoomMember    `json:"players,omitempty"`
+	Owner    *Player          `json:"owner,omitempty" store:"helper,index"`
+	Created  int64            `json:"created,omitempty"`
+	Activity int64            `json:"activity,omitempty"`
+	Round    int32            `json:"round,omitempty"`
 	History  [][]*KVPair      `json:"history,omitempty" store:"ignore"`
 	mux      sync.Mutex       `store:"ignore"`
 	channel  chan interface{} `store:"ignore"`
@@ -35,7 +38,7 @@ type Room struct {
 type RoomMember struct {
 	// RoomID string  `json:"room_id,omitempty" bson:"room_id"`
 	Index  int32
-	Player *Player `store:"helper"`
+	Player *Player `store:"helper,index"`
 	Status string
 }
 
@@ -69,6 +72,7 @@ func (r *Room) Params(c context.Context) []*KVPair   { return r.impl.Params(r.fi
 func (r *Room) Actions(c context.Context) []string   { return r.impl.Actions(r.fillMember(c)) }
 func (r *Room) You(ctx context.Context) *int32 {
 	id := ctx.Value(cSESSION_ID).(string)
+	// log.Tracef("You: looking player with id %s", id)
 	if id != "" {
 		for _, p := range r.Players {
 			if string(p.Player.ID) == id {
@@ -121,23 +125,41 @@ func (r *Room) GetValue(attr string) (interface{}, error) {
 			res["gameState"] = r.impl.SaveState()
 		}
 		return res, nil
+	case "Owner":
+		res := ""
+		if r.Owner != nil {
+			res = r.Owner.ID
+		}
+		return res, nil
+	default:
+		return nil, errors.New("unknown attr for Room.GetValue: " + attr)
 	}
 	return nil, errors.New("Undefined Room.Helper field " + attr)
 }
 
 func (r *Room) SetValue(attr string, from interface{}) error {
-	m, ok := from.(map[string]interface{})
-	if ok {
-		game := getGame(m["gameID"].(string))
-		if game != nil {
-			r.Game = game
-			r.impl = game.implGenerator(r)
-			return r.impl.LoadState(m["gameState"])
-		} else {
-			return errors.New("Invalid game id when loading: " + m["gameID"].(string))
+	switch attr {
+	case "Game":
+		m, ok := from.(map[string]interface{})
+		if ok {
+			game := getGame(m["gameID"].(string))
+			if game != nil {
+				r.Game = game
+				r.impl = game.implGenerator(r)
+				return r.impl.LoadState(m["gameState"])
+			} else {
+				return errors.New("Invalid game id when loading: " + m["gameID"].(string))
+			}
 		}
+		return errors.New("Invalid Room store format")
+	case "Owner":
+		if id, ok := from.(string); ok && id != "" {
+			r.Owner = GetPlayer(id)
+		}
+		return nil
+	default:
+		return errors.New("unknown attr for Room.SetValue: " + attr)
 	}
-	return errors.New("Invalid Room store format")
 }
 
 func (room *Room) Save(ctx context.Context) {
@@ -235,6 +257,7 @@ func newRoom(ctx context.Context, gameID string, name string) (*Room, error) {
 		Game:    game,
 		State:   "COLLECTING",
 		Players: make([]*RoomMember, 0),
+		Owner:   GetPlayer(ctx.Value(cSESSION_ID).(string)),
 		History: make([][]*KVPair, 1),
 		Round:   0,
 		Created: time.Now().Unix(),
@@ -310,12 +333,6 @@ func joinRoom(ctx context.Context, roomID string, playerName string) (*RoomMembe
 	if rm == nil {
 		pl = GetPlayer(playerID)
 		if pl == nil {
-			// pl, err = newPlayer(playerName, playerID)
-			// if err != nil {
-			// 	log.Warnf("joinRoom: %s problem create the player: %v", roomID, err)
-			// 	return nil, err
-			// }
-			// log.Tracef("joinRoom: %s: new player was created", roomID)
 			return nil, errors.New("not logged in")
 		}
 		rm = &RoomMember{Player: pl, Index: int32(len(room.Players))}
@@ -328,15 +345,14 @@ func joinRoom(ctx context.Context, roomID string, playerName string) (*RoomMembe
 	return rm, nil
 }
 
-func listRooms() ([]*Room, error) {
-	// roomsLock.RLock()
-	// defer roomsLock.RUnlock()
+func listRooms(ctx context.Context, all bool) ([]*Room, error) {
 	ret := make([]*Room, 0, len(rooms))
-	// for _, r := range rooms {
-	// 	ret = append(ret, r)
-	// }
-	store := getStorage()
-	arr, err := store.ListRecords(ret)
+	storage := getStorage()
+	filter := store.Filter{Field: "Owner", Mask: ctx.Value(cSESSION_ID).(string)}
+	if all && isAdmin(ctx) {
+		filter = store.Filter{}
+	}
+	arr, err := storage.ListRecords(filter, ret)
 	var ok bool
 	if err == nil {
 		ret, ok = arr.([]*Room)

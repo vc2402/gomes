@@ -92,6 +92,8 @@ func ProcessSet(ctx iris.Context, cont context.Context) {
 	username := body["name"]
 	login := body["login"]
 	pswd := body["password"]
+	email := body["email"]
+	avatar := body["avatar"]
 	if pswd != "" {
 		p.Password = pswd
 	}
@@ -106,6 +108,12 @@ func ProcessSet(ctx iris.Context, cont context.Context) {
 	}
 	if username != "" {
 		p.Name = username
+	}
+	if avatar != "" {
+		p.Avatar = avatar
+	}
+	if email != "" {
+		p.Email = email
 	}
 
 	p.save()

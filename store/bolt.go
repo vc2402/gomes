@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -16,6 +17,8 @@ type boltDB struct {
 	bolt *bolt.DB
 	*storage
 }
+
+const cNonUniqueIndexDelimiter = "->"
 
 func initBolt(dbName string, st *storage) (*boltDB, error) {
 	if strings.Index(dbName, ".") == -1 {
@@ -37,13 +40,77 @@ func (db *boltDB) stopBolt() {
 	db.bolt.Close()
 }
 
-func (db *boltDB) ListRecords(desc *storable, buffer interface{}) (ret interface{}, err error) {
+func (db *boltDB) ListRecords(desc *storable, filter Filter, buffer interface{}) (ret interface{}, err error) {
 	arr := reflect.ValueOf(buffer)
 	if arr.Kind() != reflect.Slice {
 		err = errors.New("ListRecords arg should be a slice")
 		return
 	}
 	err = db.bolt.View(func(tx *bolt.Tx) error {
+		if filter.Field != "" {
+			for _, fld := range desc.fields {
+				if fld.name == filter.Field {
+					if fld.flags&FFIndex != 0 {
+						addRecord := func(rec []byte) error {
+							if rec != nil {
+								id := string(rec)
+								val := reflect.New(arr.Type().Elem())
+								ok, err := db.GetRecord(id, desc, val.Interface())
+								if err == nil {
+									if ok {
+										arr = reflect.Append(arr, val.Elem())
+									}
+									return nil
+								} else {
+									return err
+								}
+							}
+							return nil
+						}
+
+						log.Tracef("ListRecords: looking by index")
+						indexName := getIndexName(desc.name, fld.name)
+						buck := tx.Bucket([]byte(indexName))
+						if buck != nil {
+							mask := []byte(filter.Mask)
+							if fld.flags&FFCaseInsensitive != 0 {
+								mask = []byte(strings.ToLower(filter.Mask))
+							}
+							// TODO: mask search
+							if fld.flags&FFUnique != 0 {
+								log.Tracef("ListRecords: looking by unique index")
+								if fld.flags&FFSeek != 0 {
+									c := buck.Cursor()
+									for k, v := c.Seek(mask); k != nil && bytes.HasPrefix(k, mask); k, v = c.Next() {
+										err = addRecord(v)
+										if err != nil {
+											return err
+										}
+									}
+								} else {
+									rec := buck.Get(mask)
+									return addRecord(rec)
+								}
+							} else {
+								// non-unique index - composed key
+
+								if fld.flags&FFSeek == 0 {
+									mask = []byte(filter.Mask + cNonUniqueIndexDelimiter)
+								}
+								c := buck.Cursor()
+								for k, v := c.Seek(mask); k != nil && bytes.HasPrefix(k, mask); k, v = c.Next() {
+									err = addRecord(v)
+									if err != nil {
+										return err
+									}
+								}
+							}
+						}
+						return nil
+					}
+				}
+			}
+		}
 		buck := tx.Bucket([]byte(desc.name))
 		if buck != nil {
 
@@ -53,17 +120,14 @@ func (db *boltDB) ListRecords(desc *storable, buffer interface{}) (ret interface
 				obj := map[string]interface{}{}
 				err = json.Unmarshal(v, &obj)
 				if err == nil {
-					// val := desc.new()
 					val := reflect.New(arr.Type().Elem())
 					err = db.fromObject(desc, &val, obj)
-					// if arr.Elem().Kind() == reflect.Ptr {
-					// 	ptr := reflect.New(arr.Elem)
-					// }
 					arr = reflect.Append(arr, val.Elem())
 				} else {
 					return err
 				}
 			}
+
 		}
 		return nil
 	})
@@ -123,6 +187,11 @@ func (db *boltDB) PutRecord(key string, desc *storable, rec interface{}) error {
 				log.Warnf("PutRecord: problem found while marshalling the record: %+v", err)
 				return err
 			}
+			err = db.processFieldsIndexes(tx, desc.name, desc, key, obj.(map[string]interface{}))
+			if err != nil {
+				log.Warnf("PutRecord: problem found while creating the index: %+v", err)
+				return err
+			}
 		case reflect.String:
 			buf = []byte(rec.(string))
 		}
@@ -139,8 +208,148 @@ func (db *boltDB) DeleteRecord(object string, key string) error {
 		if buck != nil {
 			return buck.Delete([]byte(key))
 		}
+		// TODO: delete index
 		return errors.New("invalif object kind: " + object)
 	})
+}
+
+func (db *boltDB) RebuildIndexes(desc *storable) error {
+	return db.bolt.Update(func(tx *bolt.Tx) error {
+		log.Tracef("RebuildIndexes: for descriptor %s ", desc.name)
+		db.dropFieldsIndexes(tx, desc.name, desc)
+		buck := tx.Bucket([]byte(desc.name))
+		if buck != nil {
+			c := buck.Cursor()
+			var err error
+			for k, v := c.First(); k != nil; k, v = c.Next() {
+				obj := map[string]interface{}{}
+				err = json.Unmarshal(v, &obj)
+				if err == nil {
+					err = db.processFieldsIndexes(tx, desc.name, desc, string(k), obj)
+				}
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+}
+
+func getIndexName(objName string, fieldName string) string {
+	return "idx_" + objName + "." + fieldName
+}
+
+func (db *boltDB) processFieldsIndexes(tx *bolt.Tx, name string, s *storable, key string, obj map[string]interface{}) error {
+	log.Tracef("processFieldsIndexes: starting for %s", name)
+	for _, f := range s.fields {
+		val, ok := obj[f.name]
+		if ok {
+			if f.flags&FFIndex != 0 {
+				switch val.(type) {
+				case string:
+					err := db.addIndex(tx, name, f, val.(string), key)
+					if err != nil {
+						return err
+					}
+				case []interface{}:
+					for _, v := range val.([]interface{}) {
+						err := db.addIndex(tx, name, f, v.(string), key)
+						if err != nil {
+							return err
+						}
+					}
+				default:
+					log.Warnf("processFieldsIndexes: can't process field %+v", val)
+				}
+			}
+			if f.tip == FTComplex {
+				log.Tracef("processFieldsIndexes: processing complex field %s", f.name)
+				err := db.processFieldsIndexes(tx, name+"."+f.name, f.elem, key, val.(map[string]interface{}))
+				if err != nil {
+					return err
+				}
+			} else if f.tip == FTArray {
+				log.Tracef("processFieldsIndexes: processing array field %s", f.name)
+				for _, v := range val.([]interface{}) {
+					var err error
+					switch f.tip {
+					case FTComplex:
+						err = db.processFieldsIndexes(tx, name+"."+f.name, f.elem, key, v.(map[string]interface{}))
+					}
+					if err != nil {
+						return err
+					}
+				}
+			}
+		} else {
+			log.Warnf("processFieldsIndexes: field's %s value is absent in %s", f.name, name)
+		}
+
+	}
+	return nil
+}
+func (db *boltDB) dropFieldsIndexes(tx *bolt.Tx, name string, s *storable) error {
+	log.Tracef("dropFieldsIndexes: starting for %s", name)
+	for _, f := range s.fields {
+		if f.flags&FFIndex != 0 {
+			db.dropIndex(tx, name, f)
+		}
+		if f.tip == FTComplex || f.tip == FTArray {
+			log.Tracef("dropFieldsIndexes: processing complex field %s", f.name)
+			err := db.dropFieldsIndexes(tx, name+"."+f.name, f.elem)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+func (db *boltDB) addIndex(tx *bolt.Tx, name string, field *field, key string, value string) error {
+	indexName := getIndexName(name, field.name)
+	buck, err := tx.CreateBucketIfNotExists([]byte(indexName))
+	if err != nil {
+		return err
+	}
+	idxKey := key
+	if field.flags&FFCaseInsensitive != 0 {
+		idxKey = strings.ToLower(key)
+	}
+	if field.flags&FFUnique == 0 {
+		idxKey += cNonUniqueIndexDelimiter + value
+	} else {
+		existing := buck.Get([]byte(idxKey))
+		log.Tracef("addIndex: checking if key already exists: %v", existing != nil)
+		if existing != nil && string(existing) != value {
+			log.Debugf("Unique key violation: %s(%s): %s", name, field.name, key)
+			return errors.New("Unique key is violated")
+		}
+	}
+	return buck.Put([]byte(idxKey), []byte(value))
+}
+
+func (db *boltDB) deleteIndex(tx *bolt.Tx, name string, field *field, key string, value string) error {
+	indexName := getIndexName(name, field.name)
+	buck, err := tx.CreateBucketIfNotExists([]byte(indexName))
+	if err != nil {
+		return err
+	}
+	idxKey := key
+	if field.flags&FFCaseInsensitive != 0 {
+		idxKey = strings.ToLower(key)
+	}
+	if field.flags&FFUnique == 0 {
+		idxKey += cNonUniqueIndexDelimiter + value
+	}
+	return buck.Delete([]byte(idxKey))
+}
+
+func (db *boltDB) getNonUniqueIndexRecord() {
+
+}
+func (db *boltDB) dropIndex(tx *bolt.Tx, name string, field *field) error {
+	indexName := getIndexName(name, field.name)
+	return tx.DeleteBucket([]byte(indexName))
 }
 
 func (db *boltDB) toObject(desc *storable, rec *reflect.Value) (interface{}, error) {

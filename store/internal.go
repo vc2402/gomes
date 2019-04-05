@@ -41,6 +41,15 @@ const (
 
 	TagIgnore    string = "ignore"
 	TagUseHelper string = "helper"
+
+	TagIndex           string = "index"
+	TagUnique          string = "unique"
+	TagCaseInsensitive string = "ci"
+)
+const (
+	FFIndex           = 0x01
+	FFUnique          = 0x02
+	FFCaseInsensitive = 0x04
 )
 const (
 	FLEmbeed int = iota
@@ -121,16 +130,26 @@ func (s *storage) createDescriptor(t reflect.Type) (*storable, error) {
 			tags, err := structtag.Parse(string(fld.Tag))
 			if err == nil {
 				tag, _ := tags.Get(StoreTag)
+				flags := 0
 				log.Tracef("createDescriptor: tag found for field %s: %+v", fld.Name, tag)
 				if tag != nil {
-					log.Tracef("createDescriptor: tag value is %s; options: %+v", tag.Value(), tag.Options)
-					if tag.Value() == TagIgnore || tag.HasOption(TagIgnore) {
+					log.Tracef("createDescriptor: tag value is %s; options: %+v", tag.Name, tag.Options)
+					if tag.Name == TagIgnore || tag.HasOption(TagIgnore) {
 						log.Tracef("createDescriptor: found ignore tag for field %s ", fld.Name)
 						continue
 					}
+					if tag.Name == TagIndex || tag.HasOption(TagIndex) {
+						flags |= int(FFIndex)
+					}
+					if tag.Name == TagUnique || tag.HasOption(TagUnique) {
+						flags |= int(FFIndex) | int(FFUnique)
+					}
+					if tag.HasOption(TagCaseInsensitive) {
+						flags |= int(FFCaseInsensitive)
+					}
 				}
-				field := &field{name: fld.Name, accessor: fld.Name, rtype: &fld.Type}
-				if tag != nil && tag.Value() == TagUseHelper {
+				field := &field{name: fld.Name, accessor: fld.Name, rtype: &fld.Type, flags: flags}
+				if tag != nil && tag.Name == TagUseHelper {
 					log.Tracef("createDescriptor: processing field %s 'helper' tag was found", fld.Name)
 					field.tip = FTHelper
 					field.rtype = &t

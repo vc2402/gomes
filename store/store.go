@@ -26,6 +26,18 @@ type Helper interface {
 	SetValue(attr string, from interface{}) error
 }
 
+const (
+	// FFSeek flag means that Mask is begining of the fields value
+	FFSeek = 0x01
+)
+
+type Filter struct {
+	Field string
+	Mask  string
+	Limit int
+	Flags int
+}
+
 func Init() (*Store, error) {
 	storeKind := utils.GetProperty("store.kind", "bolt")
 	dbType := utils.GetProperty("store.dbType", "sqlite3")
@@ -61,13 +73,13 @@ func (s *Store) Stop() {
 
 func (s *Store) GetKind() StoreKind { return s.kind }
 
-func (s *Store) ListRecords(buffer interface{}) (interface{}, error) {
+func (s *Store) ListRecords(filter Filter, buffer interface{}) (interface{}, error) {
 	desc, err := s.st.getDescriptor(buffer)
 	if err != nil {
 		return nil, err
 	}
 	defer catch(desc)
-	return s.bolt.ListRecords(desc, buffer)
+	return s.bolt.ListRecords(desc, filter, buffer)
 }
 
 func (s *Store) GetRecord(key string, buf interface{}) (bool, error) {
@@ -130,5 +142,14 @@ func (s *Store) DeleteRecord(object string, key string) error {
 		return s.bolt.DeleteRecord(object, key)
 	default:
 		return errors.New("not iplemented")
+	}
+}
+
+func (s *Store) RebuildIndexes(forTypeOf interface{}) error {
+	desc, err := s.st.getDescriptor(forTypeOf)
+	if err == nil {
+		return s.bolt.RebuildIndexes(desc)
+	} else {
+		return err
 	}
 }
